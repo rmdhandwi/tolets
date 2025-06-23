@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Saat button ditekan -->
+    <item android:state_pressed="true">
+        <shape>
+            <solid android:color="#75EBFC"/>
+            <stroke android:color="#75EBFC"/>
+            <corners android:radius="10dp"/>
+            <padding android:left="12dp" android:right="12dp" android:top="8dp" android:bottom="8dp"/>
+        </shape>
+    </item>
+
+    <!-- Saat button dalam keadaan default -->
+    <item>
+        <shape>
+            <stroke android:color="#1AB3D5" android:width="2dp"/> <!-- Warna default -->
+            <corners android:radius="10dp"/>
+            <padding android:left="12dp" android:right="12dp" android:top="8dp" android:bottom="8dp"/>
+        </shape>
+    </item>
+</selector>

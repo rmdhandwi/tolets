@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape>
+            <solid android:color="#B4F5FC"/> <!-- Warna saat fokus -->
+            <corners android:radius="10dp"/>
+            <padding android:left="10dp" android:right="10dp" android:top="5dp" android:bottom="5dp"/>
+        </shape>
+    </item>
+
+    <!-- Saat inputan dalam keadaan default -->
+    <item>
+        <shape>
+            <solid android:color="#75EBFC"/> <!-- Warna default -->
+            <corners android:radius="10dp"/>
+            <padding android:left="10dp" android:right="10dp" android:top="5dp" android:bottom="5dp"/>
+        </shape>
+    </item>
+</selector>
