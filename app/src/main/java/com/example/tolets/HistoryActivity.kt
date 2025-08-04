@@ -14,6 +14,10 @@ import com.example.tolets.Model.DataRiwayat
 import com.example.tolets.databinding.ActivityHistoryBinding
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.*
+import java.text.SimpleDateFormat
+import java.text.ParseException
+import java.util.Date
+import java.util.Locale
 
 class HistoryActivity : AppCompatActivity() {
 
@@ -75,8 +79,8 @@ class HistoryActivity : AppCompatActivity() {
         Ambang Batas Sensor:
         
         • Suhu (temperature): ≥ 35°C → Panas Berlebih
-        • Kelembapan (humidity): ≥ 80% → Lembab Tinggi
-        • Kualitas Udara (airQuality): ≥ 200 → Tidak Sehat
+        • Kelembapan (humidity): ≥ 65% → Lembab Tinggi
+        • Kualitas Udara (airQuality): ≥ 25 ppm → Tidak Sehat
         
         Data di atas digunakan sebagai referensi deteksi kondisi kritis.
     """.trimIndent()
@@ -88,56 +92,56 @@ class HistoryActivity : AppCompatActivity() {
         builder.show()
     }
 
+    private fun parseTanggal(tanggal: String): Date? {
+        return try {
+            val format = SimpleDateFormat("dd-MM-yyyy HH:mm:ss", Locale.getDefault())
+            format.parse(tanggal)
+        } catch (e: ParseException) {
+            null
+        }
+    }
+
+
 
     private fun loadRiwayat() {
-        // Ambil UID pengguna yang sedang login
         val uid = auth.currentUser?.uid ?: return
 
-        // Menambahkan listener ke node "riwayat" di Firebase Realtime Database
         database.child("riwayat").addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                // Bersihkan listRiwayat agar tidak terjadi duplikasi data
                 listRiwayat.clear()
 
-                // Iterasi setiap item di node "riwayat"
                 for (item in snapshot.children) {
-                    // Ambil nilai UID dari item
                     val dataUid = item.child("uid").value.toString()
 
-                    // Cocokkan data dengan UID pengguna saat ini
                     if (dataUid == uid) {
-                        // Konversi data snapshot menjadi objek DataRiwayat
                         val riwayat = item.getValue(DataRiwayat::class.java)
-
-                        // Jika data tidak null, tambahkan ke list dengan menyimpan key-nya
                         if (riwayat != null) {
                             listRiwayat.add(riwayat.copy(key = item.key ?: ""))
                         }
                     }
                 }
 
-                // Tampilkan tampilan kosong jika tidak ada riwayat
+                // 🔽 Urutkan berdasarkan tanggal terbaru (parsing dari string)
+                listRiwayat.sortByDescending { parseTanggal(it.tanggal)?.time ?: 0L }
+
                 if (listRiwayat.isEmpty()) {
-                    binding.tvKosong.visibility = View.VISIBLE      // Tampilkan teks "Kosong"
-                    binding.rvRiwayat.visibility = View.GONE        // Sembunyikan RecyclerView
-                    binding.btnDeleteAll.visibility = View.GONE     // Sembunyikan tombol "Hapus Semua"
+                    binding.tvKosong.visibility = View.VISIBLE
+                    binding.rvRiwayat.visibility = View.GONE
+                    binding.btnDeleteAll.visibility = View.GONE
                 } else {
-                    binding.tvKosong.visibility = View.GONE         // Sembunyikan teks "Kosong"
-                    binding.rvRiwayat.visibility = View.VISIBLE     // Tampilkan RecyclerView
-                    binding.btnDeleteAll.visibility = View.VISIBLE  // Tampilkan tombol "Hapus Semua"
+                    binding.tvKosong.visibility = View.GONE
+                    binding.rvRiwayat.visibility = View.VISIBLE
+                    binding.btnDeleteAll.visibility = View.VISIBLE
                 }
 
-                // Beri tahu adapter bahwa data telah diperbarui
                 adapter.notifyDataSetChanged()
             }
 
             override fun onCancelled(error: DatabaseError) {
-                // Callback ini dipanggil jika permintaan ke database dibatalkan atau gagal
-                // Dapat ditambahkan log error atau pesan Toast di sini jika diperlukan
+                // Handle error
             }
         })
     }
-
 
     // Fungsi untuk menghapus satu item riwayat berdasarkan key
     private fun deleteSingleRiwayat(key: String) {

@@ -2,6 +2,7 @@ package com.example.tolets
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -73,6 +74,18 @@ class MainActivity : AppCompatActivity() {
                 else -> false
             }
         }
+
+        binding.modeSwitch.setOnCheckedChangeListener { _, isManual ->
+            sensorRef.child("manual").setValue(isManual)
+
+            // Update gambar langsung
+            if (isManual) {
+                binding.imgMode.setImageResource(R.drawable.manual)
+            } else {
+                binding.imgMode.setImageResource(R.drawable.auto)
+            }
+        }
+
     }
 
 
@@ -179,47 +192,83 @@ class MainActivity : AppCompatActivity() {
                 val airQuality = snapshot.child("airQuality").getValue(Int::class.java) ?: 0
                 val pir = snapshot.child("pir").getValue(Int::class.java) ?: 0
                 val relay = snapshot.child("relay").getValue(Int::class.java) ?: 0
+                val manual = snapshot.child("manual").getValue(Boolean::class.java) ?: false
 
+                // Update UI sensor
                 binding.txtTemperature.text = "${temperature}°C"
                 binding.txtHumidity.text = "$humidity %"
                 binding.txtairQuality.text = "$airQuality ppm"
 
-                binding.fanButton.setOnCheckedChangeListener(null)
-                binding.fanButton.isChecked = relay == 1
-                binding.fanButton.text = if (relay == 1) "ON" else "OFF"
+                // === Mode Switch ===
+                binding.modeSwitch.setOnCheckedChangeListener(null)
+                binding.modeSwitch.isChecked = manual
 
-                binding.fanButton.setOnCheckedChangeListener { _, isChecked ->
-                    val newRelay = if (isChecked) 1 else 0
-                    binding.fanButton.text = if (isChecked) "ON" else "OFF"
-                    sensorRef.child("relay").setValue(newRelay)
+                // ❗ Jika mode AUTO dan relay ON → disable switch
+                binding.modeSwitch.isEnabled = !(relay == 1 && !manual)
+
+                binding.modeSwitch.setOnCheckedChangeListener { _, isManual ->
+                    sensorRef.child("manual").setValue(isManual).addOnSuccessListener {
+                        binding.imgMode.setImageResource(
+                            if (isManual) R.drawable.manual else R.drawable.auto
+                        )
+
+                        if (!isManual) {
+                            // Jika ganti ke AUTO → matikan kipas
+                            sensorRef.child("relay").setValue(0)
+                        }
+                    }
                 }
 
+
+                // Ganti gambar mode sesuai status
+                binding.imgMode.setImageResource(
+                    if (manual) R.drawable.manual else R.drawable.auto
+                )
+
+                // === Ambang batas otomatis ===
                 val batasTemperature = 35.0
-                val batasHumidity = 80.0
+                val batasHumidity = 65.0
                 val batasAirQuality = 25
 
                 val pelanggaran = mutableListOf<String>()
-
                 if (temperature > batasTemperature) pelanggaran.add("Suhu > $batasTemperature°C")
                 if (humidity > batasHumidity) pelanggaran.add("Kelembaban > $batasHumidity%")
                 if (airQuality > batasAirQuality) pelanggaran.add("Gas Amonia > $batasAirQuality ppm")
 
-                if (pelanggaran.isNotEmpty()) {
-                    if (relay != 1) {
-                        sensorRef.child("relay").setValue(1)
-                        binding.fanButton.isChecked = true
-                        binding.fanButton.text = "ON"
+                // === Mode: AUTO ===
+                if (!manual) {
+                    binding.fanButton.setOnCheckedChangeListener(null)
+                    binding.fanButton.isEnabled = false
+                    binding.fanButton.isChecked = relay == 1
+                    binding.fanButton.text = if (relay == 1) "ON (Auto)" else "OFF (Auto)"
+
+                    if (pelanggaran.isNotEmpty()) {
+                        if (relay != 1) sensorRef.child("relay").setValue(1)
+
+                        simpanRiwayatDenganLokasi(
+                            uid = auth.currentUser?.uid ?: return,
+                            temperature = temperature,
+                            humidity = humidity,
+                            airQuality = airQuality,
+                            pelanggaran = pelanggaran
+                        )
+                    } else {
+                        if (relay != 0) sensorRef.child("relay").setValue(0)
                     }
 
-                    simpanRiwayatDenganLokasi(
-                        uid = auth.currentUser?.uid ?: return,
-                        temperature = temperature,
-                        humidity = humidity,
-                        airQuality = airQuality,
-                        pelanggaran = pelanggaran
-                    )
+                    // === Mode: MANUAL ===
+                } else {
+                    binding.fanButton.setOnCheckedChangeListener(null)
+                    binding.fanButton.isEnabled = true
+                    binding.fanButton.isChecked = relay == 1
+                    binding.fanButton.text = if (relay == 1) "ON" else "OFF"
+
+                    binding.fanButton.setOnCheckedChangeListener { _, isChecked ->
+                        sensorRef.child("relay").setValue(if (isChecked) 1 else 0)
+                    }
                 }
 
+                // === UI Icon Suhu ===
                 val suhuImage = when {
                     temperature > 35 -> R.drawable.hot
                     temperature < 20 -> R.drawable.cold
@@ -227,6 +276,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 binding.imgTemperature.setImageResource(suhuImage)
 
+                // === UI Kehadiran Orang ===
                 if (pir == 1) {
                     binding.imgPeople.setImageResource(R.drawable.people)
                     binding.txtPeople.text = "Ada Orang"
@@ -241,6 +291,8 @@ class MainActivity : AppCompatActivity() {
             }
         })
     }
+
+
 
     private fun simpanRiwayatDenganLokasi(
         uid: String,
@@ -307,6 +359,16 @@ class MainActivity : AppCompatActivity() {
         val channelId = "sensor_alert_channel"
         val channelName = "Sensor Alert"
 
+        val intent = Intent(this, HistoryActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+
+            this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -319,15 +381,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(R.drawable.icon) // ganti dengan icon yang ada
+            .setSmallIcon(R.drawable.icon)
             .setContentTitle("Peringatan Sensor!")
             .setContentText("Pelanggaran terdeteksi: $keterangan")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
+            .setContentIntent(pendingIntent) // 👈 agar bisa diklik dan menuju activity
             .build()
 
         notificationManager.notify(1001, notification)
     }
+
 
     private fun showNotificationWithLocation(keterangan: String) {
         val uid = auth.currentUser?.uid ?: return

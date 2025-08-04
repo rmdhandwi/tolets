@@ -1,46 +1,43 @@
-#include <ESP8266WiFi.h>          // Library koneksi WiFi untuk ESP8266
-#include <FirebaseESP8266.h>      // Library untuk koneksi ke Firebase Realtime Database
-#include <DHT.h>                  // Library untuk sensor suhu & kelembaban DHT11
+#include <ESP8266WiFi.h>
+#include <FirebaseESP8266.h>
+#include <DHT.h>
 
-// Konfigurasi WiFi
-const char* ssid = "Monitoring";         // Nama WiFi
-const char* password = "12345678";       // Password WiFi
+// WiFi
+const char* ssid = "tes";
+const char* password = "12345678";
 
-
-// Konfigurasi Firebase
-#define FIREBASE_HOST "https://tolets-71175-default-rtdb.firebaseio.com/"   // Alamat database Firebase
-#define FIREBASE_AUTH "AIzaSyCA8Fm-C_fT7Z7Wyy4s7xPicxqupdxi8kI"             // Token otentikasi Firebase
+// Firebase
+#define FIREBASE_HOST "https://tolets-71175-default-rtdb.firebaseio.com/"
+#define FIREBASE_AUTH "AIzaSyCA8Fm-C_fT7Z7Wyy4s7xPicxqupdxi8kI"
 
 FirebaseData firebaseData;
 FirebaseAuth auth;
 FirebaseConfig config;
 
-// Konfigurasi ID Sensor
-String sensorID = "1";  // Ganti sesuai lokasi: toilet1, toilet2, dll
+// Sensor dan pin
+String sensorID = "1";
+#define RELAY D8
+#define DHTPIN D7
+#define PIRPIN D5
+#define MQ135 A0
 
-// Pin konfigurasi
-#define RELAY D4       // Pin kontrol relay
-#define DHTPIN D2      // Pin sensor DHT
-#define PIRPIN D3      // Pin sensor PIR (gerakan)
-#define MQ135 A0       // Pin sensor kualitas udara (MQ-135)
-
-#define DHTTYPE DHT11  // Tipe sensor DHT
+#define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
 
+// Ambang batas
+float batasTemperature = 35.0;
+float batasHumidity = 65.0;
+int batasAirQuality = 25;
 
-// Waktu non-blocking
 unsigned long previousMillis = 0;
 const long interval = 5000;
 
 void setup() {
     Serial.begin(115200);
-
-    // Setup pin
     pinMode(RELAY, OUTPUT);
     pinMode(PIRPIN, INPUT);
     dht.begin();
 
-    // Koneksi ke WiFi
     WiFi.begin(ssid, password);
     Serial.print("Menghubungkan ke WiFi");
     while (WiFi.status() != WL_CONNECTED) {
@@ -48,72 +45,70 @@ void setup() {
         Serial.print(".");
     }
     Serial.println("\nTerhubung ke WiFi");
-    Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
 
-    // Konfigurasi Firebase
     config.host = FIREBASE_HOST;
     config.signer.tokens.legacy_token = FIREBASE_AUTH;
     Firebase.begin(&config, &auth);
     Firebase.reconnectWiFi(true);
+
+    String basePath = "/sensor/" + sensorID;
+    Firebase.setInt(firebaseData, basePath + "/relay", 0);
+    Firebase.setBool(firebaseData, basePath + "/manual", false);
+    digitalWrite(RELAY, LOW);
 }
 
 void loop() {
     unsigned long currentMillis = millis();
-  
-    // Kirim data setiap 5 detik
     if (currentMillis - previousMillis >= interval) {
         previousMillis = currentMillis;
 
-        // Baca sensor
         float temperature = dht.readTemperature();
         float humidity = dht.readHumidity();
         int pirState = digitalRead(PIRPIN);
         int airQuality = analogRead(MQ135);
-
-        // Buat path data di Firebase
         String basePath = "/sensor/" + sensorID;
 
-        // Ambil status relay dari Firebase
-        if (Firebase.getInt(firebaseData, basePath + "/relay")) {
-            int relayStatus = firebaseData.intData();
-            digitalWrite(RELAY, relayStatus == 1 ? LOW : HIGH);
-            Serial.println(relayStatus == 1 ? "Relay ON" : "Relay OFF");
+        // Kirim data sensor ke Firebase
+        Firebase.setFloat(firebaseData, basePath + "/temperature", temperature);
+        Firebase.setFloat(firebaseData, basePath + "/humidity", humidity);
+        Firebase.setInt(firebaseData, basePath + "/pir", pirState);
+        Firebase.setInt(firebaseData, basePath + "/airQuality", airQuality);
+
+        // Cek mode manual/otomatis
+        bool manualMode = false;
+        if (Firebase.getBool(firebaseData, basePath + "/manual")) {
+            manualMode = firebaseData.boolData();
         } else {
-            Serial.println("Gagal membaca status relay");
-            Serial.println(firebaseData.errorReason());
+            Serial.println("Gagal membaca mode manual");
         }
 
-        // Kirim data suhu
-        if (Firebase.setFloat(firebaseData, basePath + "/temperature", temperature)) {
-            Serial.println("Temperature sent!");
+        if (manualMode) {
+            // Mode Manual
+            if (Firebase.getInt(firebaseData, basePath + "/relay")) {
+                int relayStatus = firebaseData.intData();
+                digitalWrite(RELAY, relayStatus == 1 ? HIGH : LOW);
+                Serial.println(relayStatus == 1 ? "Manual: Relay ON" : "Manual: Relay OFF");
+            } else {
+                Serial.println("Gagal membaca status relay (manual)");
+            }
         } else {
-            Serial.println("Failed to send temperature");
-            Serial.println(firebaseData.errorReason());
+            // Mode Otomatis
+            bool overThreshold = (temperature >= batasTemperature) ||
+                                 (humidity >= batasHumidity) ||
+                                 (airQuality >= batasAirQuality);
+
+            if (overThreshold) {
+                digitalWrite(RELAY, HIGH);
+                Firebase.setInt(firebaseData, basePath + "/relay", 1);
+                Serial.println("AUTO: Ambang batas terlampaui - Relay ON");
+            } else {
+                digitalWrite(RELAY, LOW);
+                Firebase.setInt(firebaseData, basePath + "/relay", 0);
+                Serial.println("AUTO: Kondisi normal - Relay OFF");
+            }
         }
 
-        // Kirim data kelembaban
-        if (Firebase.setFloat(firebaseData, basePath + "/humidity", humidity)) {
-            Serial.println("Humidity sent!");
-        } else {
-            Serial.println("Failed to send humidity");
-            Serial.println(firebaseData.errorReason());
-        }
-
-        // Kirim data PIR (gerakan)
-        if (Firebase.setInt(firebaseData, basePath + "/pir", pirState)) {
-            Serial.println("PIR state sent!");
-        } else {
-            Serial.println("Failed to send PIR state");
-            Serial.println(firebaseData.errorReason());
-        }
-
-        // Kirim data kualitas udara
-        if (Firebase.setInt(firebaseData, basePath + "/airQuality", airQuality)) {
-            Serial.println("Air quality sent!");
-        } else {
-            Serial.println("Failed to send air quality");
-            Serial.println(firebaseData.errorReason());
-        } 
-     } 
+        Serial.println("Data sensor dikirim!\n");
+    }
 }
